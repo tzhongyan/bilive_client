@@ -1,56 +1,29 @@
-import * as request from 'request'
-import * as tools from './lib/tools'
-import { apiLiveOrigin, smallTVPathname, rafflePathname, lightenPathname } from './index'
+import request from 'request'
+import tools from './lib/tools'
+import AppClient from './lib/app_client'
+import { apiLiveOrigin, smallTVPathname, rafflePathname, lotteryPathname } from './index'
 /**
  * 自动参与抽奖
  * 
- * @export
  * @class Raffle
  */
-export class Raffle {
+class Raffle {
   /**
    * 创建一个 Raffle 实例
    * @param {raffleOptions} raffleOptions
    * @memberof Raffle
    */
   constructor(raffleOptions: raffleOptions) {
-    this._raffleId = raffleOptions.raffleId
-    this._roomID = raffleOptions.roomID
-    this._jar = raffleOptions.jar
-    this._nickname = raffleOptions.nickname
+    this._options = raffleOptions
   }
   /**
-   * 参与ID
-   * 
+   * 抽奖设置
+   *
    * @private
-   * @type {number}
+   * @type {raffleOptions}
    * @memberof Raffle
    */
-  private _raffleId: number
-  /**
-   * 房间号
-   * 
-   * @private
-   * @type {number}
-   * @memberof Raffle
-   */
-  private _roomID: number
-  /**
-   * CookieJar
-   * 
-   * @private
-   * @type {request.CookieJar}
-   * @memberof Raffle
-   */
-  private _jar: request.CookieJar
-  /**
-   * 昵称
-   * 
-   * @private
-   * @type {string}
-   * @memberof Raffle
-   */
-  private _nickname: string
+  private _options: raffleOptions
   /**
    * 抽奖地址
    * 
@@ -58,7 +31,7 @@ export class Raffle {
    * @type {string}
    * @memberof Raffle
    */
-  private _url: string
+  private _url!: string
   /**
    * 参与小电视抽奖
    * 
@@ -66,38 +39,35 @@ export class Raffle {
    */
   public SmallTV() {
     this._url = apiLiveOrigin + smallTVPathname
-    return this._Raffle()
+    this._Raffle()
   }
   /**
-   * 参与抽奖
+   * 参与抽奖Raffle
    * 
    * @memberof Raffle
    */
   public Raffle() {
     this._url = apiLiveOrigin + rafflePathname
-    return this._Raffle()
+    this._Raffle()
   }
   /**
-   * 抽奖
+   * 参与抽奖Lottery
+   * 
+   * @memberof Raffle
+   */
+  public Lottery() {
+    this._url = apiLiveOrigin + lotteryPathname
+    this._Lottery()
+  }
+  /**
+   * 抽奖Raffle
    * 
    * @private
    * @memberof Raffle
    */
   private async _Raffle() {
-    let join: request.Options = {
-      uri: `${this._url}/join?roomid=${this._roomID}&raffleId=${this._raffleId}`,
-      jar: this._jar,
-      json: true,
-      headers: {
-        'Referer': `https://live.bilibili.com/${this._roomID}`
-      }
-    }
-      , joinResponse = await tools.XHR<raffleJoinResponse>(join)
-    if (joinResponse.response.statusCode === 200 && joinResponse.body.code === 0) {
-      let time = joinResponse.body.data.time * 1e+3 + 3e+4
-      await tools.Sleep(time)
-      this._RaffleReward()
-    }
+    await tools.Sleep(this._options.time * 1000)
+    this._RaffleAward()
   }
   /**
    * 获取抽奖结果
@@ -105,110 +75,48 @@ export class Raffle {
    * @private
    * @memberof Raffle
    */
-  private async _RaffleReward() {
-    let reward: request.Options = {
-      uri: `${this._url}/notice?roomid=${this._roomID}&raffleId=${this._raffleId}`,
-      jar: this._jar,
+  private async _RaffleAward() {
+    const reward: request.Options = {
+      method: 'POST',
+      uri: `${this._url}/getAward`,
+      body: AppClient.signQueryBase(`${this._options.user.tokenQuery}&raffleId=${this._options.raffleId}\
+&roomid=${this._options.roomID}&type=${this._options.type}`),
       json: true,
-      headers: {
-        'Referer': `https://live.bilibili.com/${this._roomID}`
+      headers: this._options.user.headers
+    }
+    const raffleAward = await tools.XHR<raffleAward>(reward, 'Android')
+    if (raffleAward === undefined || raffleAward.response.statusCode !== 200) return
+    if (raffleAward.body.code === -401) {
+      await tools.Sleep(5 * 1000)
+      this._RaffleAward()
+    }
+    else if (raffleAward.body.code === 0) {
+      const gift = raffleAward.body.data
+      if (gift.gift_num === 0) tools.Log(this._options.user.nickname, this._options.title, this._options.raffleId, raffleAward.body.msg)
+      else {
+        const msg = `${this._options.user.nickname} ${this._options.title} ${this._options.raffleId} 获得 ${gift.gift_num} 个${gift.gift_name}`
+        tools.Log(msg)
+        if (gift.gift_name.includes('小电视')) tools.sendSCMSG(msg)
       }
-    }
-      , rewardResponse = await tools.XHR<raffleRewardResponse>(reward)
-    if (rewardResponse.response.statusCode !== 200) return
-    if (rewardResponse.body.code === -400 || rewardResponse.body.data.status === 3) {
-      await tools.Sleep(3e+4)
-      this._RaffleReward()
-    }
-    else {
-      let gift = rewardResponse.body.data
-      if (gift.gift_num === 0) tools.Log(this._nickname, rewardResponse.body.msg)
-      else tools.Log(this._nickname, `获得 ${gift.gift_num} 个${gift.gift_name}`)
     }
   }
   /**
-   * 参与快速抽奖
+   * 抽奖Lottery
    * 
    * @memberof Raffle
    */
-  public async Lighten() {
-    this._url = apiLiveOrigin + lightenPathname
-    let getCoin: request.Options = {
+  public async _Lottery() {
+    const reward: request.Options = {
       method: 'POST',
-      uri: `${this._url}/getCoin`,
-      body: `roomid=${this._roomID}&lightenId=${this._raffleId}}`,
-      jar: this._jar,
+      uri: `${this._url}/join`,
+      body: AppClient.signQueryBase(`${this._options.user.tokenQuery}&id=${this._options.raffleId}\
+&roomid=${this._options.roomID}&type=${this._options.type}`),
       json: true,
-      headers: {
-        'Referer': `https://live.bilibili.com/${this._roomID}`
-      }
+      headers: this._options.user.headers
     }
-      , lightenRewardResponse = await tools.XHR<lightenRewardResponse>(getCoin)
-        .catch((reject) => { tools.Error(this._nickname, reject) })
-    if (lightenRewardResponse != null && lightenRewardResponse.body.code === 0) tools.Log(this._nickname, lightenRewardResponse.body.msg)
+    const lotteryReward = await tools.XHR<lotteryReward>(reward, 'Android')
+    if (lotteryReward !== undefined && lotteryReward.response.statusCode === 200 && lotteryReward.body.code === 0)
+      tools.Log(this._options.user.nickname, this._options.title, this._options.raffleId, lotteryReward.body.data.message)
   }
 }
-/**
- * 抽奖设置
- * 
- * @export
- * @interface raffleOptions
- */
-export interface raffleOptions {
-  raffleId: number
-  roomID: number
-  jar: request.CookieJar
-  nickname: string
-}
-/**
-/**
- * 参与抽奖信息
- * 
- * @interface raffleJoinResponse
- */
-interface raffleJoinResponse {
-  code: number
-  msg: string
-  message: string
-  data: raffleJoinResponseData
-}
-interface raffleJoinResponseData {
-  face?: string
-  from: string
-  type: 'small_tv' | string
-  roomid?: string
-  raffleId: number | string
-  time: number
-  status: number
-}
-/**
- * 抽奖结果信息
- * 
- * @interface raffleRewardResponse
- */
-interface raffleRewardResponse {
-  code: number
-  msg: string
-  message: string
-  data: raffleRewardResponse_Data
-}
-interface raffleRewardResponse_Data {
-  gift_id: number
-  gift_name: string
-  gift_num: number
-  gift_from: string
-  gift_type: number
-  gift_content: string
-  status?: number
-}
-/**
- * 快速抽奖结果信息
- * 
- * @interface lightenRewardResponse
- */
-interface lightenRewardResponse {
-  code: number
-  msg: string
-  message: string
-  data: [number]
-}
+export default Raffle
