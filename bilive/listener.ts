@@ -72,6 +72,7 @@ class Listener extends EventEmitter {
       moduleList.forEach(modules => {
         if (modules.module_info.type === 9 && modules.list.length > 0) {
           const areaID = modules.module_info.id
+          const areaTitle = modules.module_info.title
           const roomID = (<getAllListDataRoomList>modules.list[0]).roomid
           const areaDM = <DMclient>this._DMclient.get(areaID)
           if (areaDM === undefined || areaDM.roomID !== roomID) {
@@ -81,6 +82,7 @@ class Listener extends EventEmitter {
                 .removeAllListeners()
                 .Close()
               this._DMclient.delete(areaRoomID)
+              tools.Log(`已移除${areaTitle}分区房间`, areaRoomID)
             }
             const newDMclient = new DMclient({ roomID, userID })
             newDMclient
@@ -88,6 +90,7 @@ class Listener extends EventEmitter {
               .on('SYS_GIFT', dataJson => this._SYSGiftHandler(dataJson))
               .Connect()
             this._DMclient.set(areaID, newDMclient)
+            tools.Log(`已监听${areaTitle}分区房间`, roomID)
           }
         }
       })
