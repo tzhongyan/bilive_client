@@ -68,31 +68,28 @@ class Listener extends EventEmitter {
       json: true
     }, 'Android')
     if (getAllList !== undefined && getAllList.response.statusCode === 200 && getAllList.body.code === 0) {
-      const moduleList = getAllList.body.data.module_list
-      moduleList.forEach(modules => {
-        if (modules.module_info.type === 9 && modules.list.length > 0) {
-          const areaID = modules.module_info.id
-          const areaTitle = modules.module_info.title
-          const roomID = (<getAllListDataRoomList>modules.list[0]).roomid
-          const areaDM = <DMclient>this._DMclient.get(areaID)
-          if (areaDM === undefined || areaDM.roomID !== roomID) {
-            if (areaDM !== undefined) {
-              const areaRoomID = areaDM.roomID
-              areaDM
-                .removeAllListeners()
-                .Close()
-              this._DMclient.delete(areaRoomID)
-              tools.Log(`已移除${areaTitle}分区房间`, areaRoomID)
-            }
-            const newDMclient = new DMclient({ roomID, userID })
-            newDMclient
-              .on('SYS_MSG', dataJson => this._SYSMSGHandler(dataJson))
-              .on('SYS_GIFT', dataJson => this._SYSGiftHandler(dataJson))
-              .Connect()
-            this._DMclient.set(areaID, newDMclient)
-            tools.Log(`已监听${areaTitle}分区房间`, roomID)
-          }
+      const roomIDs: Set<number> = new Set()
+      // 获取房间列表
+      getAllList.body.data.module_list.forEach(modules => {
+        if (modules.module_info.type === 9 && modules.list.length > 2) {
+          for (let i = 0; i < 3; i++) roomIDs.add((<getAllListDataRoomList>modules.list[i]).roomid)
         }
+      })
+      // 添加房间
+      roomIDs.forEach(roomID => {
+        if (this._DMclient.has(roomID)) return
+        const newDMclient = new DMclient({ roomID, userID })
+        newDMclient
+          .on('SYS_MSG', dataJson => this._SYSMSGHandler(dataJson))
+          .on('SYS_GIFT', dataJson => this._SYSGiftHandler(dataJson))
+          .Connect()
+        this._DMclient.set(roomID, newDMclient)
+      })
+      // 移除房间
+      this._DMclient.forEach((roomDM, roomID) => {
+        if (roomIDs.has(roomID)) return
+        roomDM.removeAllListeners().Close()
+        this._DMclient.delete(roomID)
       })
       await tools.Sleep(10 * 60 * 1000)
       this._addAreaRoom()
